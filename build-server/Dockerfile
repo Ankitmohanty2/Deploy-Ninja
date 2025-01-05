@@ -1,29 +1,20 @@
-FROM ubuntu:focal
+FROM node:18-alpine
 
-RUN apt-get update
+WORKDIR /app
 
-RUN apt-get install -y curl
+# Install build essentials
+RUN apk add --no-cache python3 make g++
 
-RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
+# Copy package files
+COPY package*.json ./
 
-RUN apt-get upgrade -y
-
-RUN apt-get install -y nodejs
-
-RUN apt-get install -y git
-
-WORKDIR /home/app
-
-COPY main.sh main.sh
-COPY server.js server.js
-COPY .env .env
-COPY package*.json .
-COPY ca.pem ca.pem
-
+# Install dependencies
 RUN npm install
 
-RUN chmod +x main.sh
-RUN chmod +x server.js
+# Copy source code
+COPY . .
 
-# Set the entry point
-ENTRYPOINT [ "/home/app/main.sh" ]
+# Create output directory
+RUN mkdir output
+
+CMD ["npm", "start"]
