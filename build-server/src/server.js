@@ -1,341 +1,43 @@
-// const { exec } = require("child_process");
-// const path = require("path");
-// const fs = require("fs");
-// const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
-// const mime = require("mime-types");
-// const dotenv = require("dotenv");
-// const { Kafka, Partitioners } = require("kafkajs");
-// const { createClient } = require("@clickhouse/client");
-// const { randomUUID } = require("crypto");
-
-// // Load credentials from .env file
-// const envPath = path.resolve(process.cwd(), ".env");
-// const envConfig = dotenv.config({ path: envPath }).parsed || {};
-
-// // Create S3 client with credentials from .env file
-// const s3Client = new S3Client({
-//   region: envConfig.AWS_REGION,
-//   credentials: {
-//     accessKeyId: envConfig.AWS_ACCESS_KEY_ID,
-//     secretAccessKey: envConfig.AWS_SECRET_ACCESS_KEY,
-//   },
-// });
-
-// // Get project-related variables from process.env (Docker/ECS environment)
-// const PROJECT_URI = process.env.PROJECT_URI;
-// const DEPLOYMENT_ID = process.env.DEPLOYMENT_ID;
-// const PROJECT_INSTALL_COMMAND = process.env.PROJECT_INSTALL_COMMAND;
-// const PROJECT_BUILD_COMMAND = process.env.PROJECT_BUILD_COMMAND;
-// const PROJECT_ROOT_DIR = process.env.PROJECT_ROOT_DIR;
-// const S3_BUCKET_NAME = envConfig.S3_BUCKET_NAME;
-
-// // Initialize clients
-// const kafka = new Kafka({
-//   clientId: envConfig.KAFKA_CLIENT_ID,
-//   brokers: [envConfig.KAFKA_BROKER],
-//   ssl: {
-//     ca: [fs.readFileSync(path.join(__dirname, "ca.pem"), "utf-8")],
-//     rejectUnauthorized: true,
-//   },
-//   sasl: {
-//     username: envConfig.SASL_USERNAME,
-//     password: envConfig.SASL_PASSWORD,
-//     mechanism: envConfig.SASL_MECHANISM,
-//   },
-//   connectionTimeout: 10000,
-//   authenticationTimeout: 10000,
-//   retry: {
-//     initialRetryTime: 100,
-//     retries: 8,
-//   },
-// });
-
-// const client = createClient({
-//   host: envConfig.CLICKHOUSE_HOST,
-//   username: envConfig.CLICKHOUSE_USER,
-//   password: envConfig.CLICKHOUSE_PASSWORD,
-//   database: envConfig.CLICKHOUSE_DB,
-// });
-
-// let isExiting = false;
-// let producer = null;
-// let consumer = null;
-
-// // Initialize producer once and reuse
-// async function getProducer() {
-//   if (!producer) {
-//     producer = kafka.producer({
-//       createPartitioner: Partitioners.LegacyPartitioner,
-//     });
-//     await producer.connect();
-//   }
-//   return producer;
-// }
-
-// async function publishLog(log) {
-//   if (isExiting) return;
-
-//   try {
-//     const producer = await getProducer();
-//     await producer.send({
-//       topic: `build-logs`,
-//       messages: [
-//         {
-//           key: "log",
-//           value: JSON.stringify({ PROJECT_URI, DEPLOYMENT_ID, log }),
-//         },
-//       ],
-//     });
-//   } catch (error) {
-//     console.error("Error publishing log:", error);
-//   }
-// }
-
-// async function forceExit() {
-//   if (isExiting) return;
-//   isExiting = true;
-
-//   console.log("Force exiting process...");
-//   try {
-//     if (producer) await producer.disconnect();
-//     if (consumer) await consumer.disconnect();
-//     await client.close();
-
-//     setTimeout(() => process.exit(0), 1000);
-//   } catch (error) {
-//     console.error("Error during force exit:", error);
-//     process.exit(1);
-//   }
-// }
-
-// async function InitializeScript() {
-//   try {
-//     console.log("Executing script...");
-//     await publishLog("Executing script...");
-//     const outputDir = path.join(__dirname, "output");
-
-//     const projectEnvVars = Object.keys(process.env)
-//       .filter((key) => key.startsWith("PROJECT_ENVIRONMENT_"))
-//       .reduce((envVars, key) => {
-//         envVars[key] = process.env[key];
-//         return envVars;
-//       }, {});
-
-//     return new Promise((resolve, reject) => {
-//       const buildProcess = exec(
-//         `cd ${outputDir} && ${PROJECT_INSTALL_COMMAND} && ${PROJECT_BUILD_COMMAND}`,
-//         {
-//           cwd: PROJECT_ROOT_DIR,
-//           env: { ...process.env, ...projectEnvVars },
-//         }
-//       );
-
-//       buildProcess.stdout.on("data", async (data) => {
-//         console.log(data.toString());
-//         await publishLog(data.toString());
-//       });
-
-//       buildProcess.stderr.on("data", async (data) => {
-//         console.error("Error:", data.toString());
-//         await publishLog(data.toString());
-//       });
-
-//       buildProcess.on("close", async (code) => {
-//         try {
-//           console.log(`Build complete with code ${code}`);
-//           await publishLog(`Build complete with code ${code}`);
-
-//           const distDir = path.join(outputDir, "dist");
-//           const distFiles = fs.readdirSync(distDir, { recursive: true });
-
-//           for (const file of distFiles) {
-//             const filePath = path.join(distDir, file);
-//             if (fs.lstatSync(filePath).isDirectory()) continue;
-
-//             console.log(`Uploading ${filePath}...`);
-//             await publishLog(`Uploading ${filePath}...`);
-
-//             const command = new PutObjectCommand({
-//               Bucket: S3_BUCKET_NAME,
-//               Key: `__outputs/${PROJECT_URI}/${file}`,
-//               Body: fs.createReadStream(filePath),
-//               ContentType: mime.lookup(filePath),
-//             });
-
-//             await s3Client.send(command);
-//           }
-
-//           console.log("Upload complete...");
-//           await publishLog("Upload complete...");
-//           await publishLog("Finalizing some changes...");
-//           resolve();
-//         } catch (error) {
-//           console.error("Error in build process:", error);
-//           await publishLog(`Error in build process: ${error.message}`);
-//           reject(error);
-//         }
-//       });
-
-//       buildProcess.on("error", async (error) => {
-//         console.error("Execution error:", error);
-//         await publishLog(`Execution error: ${error.message}`);
-//         reject(error);
-//       });
-//     });
-//   } catch (error) {
-//     console.error("Error in InitializeScript:", error);
-//     throw error;
-//   }
-// }
-
-// async function initializeKafkaConsumer() {
-//   try {
-//     const event_id = randomUUID();
-//     consumer = kafka.consumer({ groupId: "build-logs-consumer" });
-//     await consumer.connect();
-    
-//     // Subscribe before script execution to ensure we don't miss messages
-//     await consumer.subscribe({ topic: "build-logs", fromBeginning: false });
-
-//     await consumer.run({
-//       eachBatch: async function ({
-//         batch,
-//         heartbeat,
-//         commitOffsetsIfNecessary,
-//       }) {
-//         const messages = batch.messages;
-//         console.log(`Recv. ${messages.length} messages..`);
-
-//         for (const message of messages) {
-//           if (!message.value) continue;
-
-//           const stringMessage = message.value.toString();
-//           const parsedMessage = JSON.parse(stringMessage);
-
-//           if (parsedMessage.DEPLOYMENT_ID !== DEPLOYMENT_ID) {
-//             continue;
-//           }
-
-//           console.log({
-//             log: parsedMessage.log,
-//             DEPLOYMENT_ID: parsedMessage.DEPLOYMENT_ID,
-//           });
-
-//           try {
-//             if (!isExiting) {
-//               const { query_id } = await client.insert({
-//                 table: "log_events",
-//                 values: [
-//                   {
-//                     event_id,
-//                     deployment_id: parsedMessage.DEPLOYMENT_ID,
-//                     log: parsedMessage.log,
-//                   },
-//                 ],
-//                 format: "JSONEachRow",
-//               });
-
-//               console.log(query_id);
-
-//               await commitOffsetsIfNecessary();
-//               await heartbeat();
-//             }
-//           } catch (err) {
-//             console.error("Error processing message:", err);
-//           }
-//         }
-//       },
-//       autoCommit: false,
-//       eachBatchAutoResolve: true,
-//     });
-//   } catch (error) {
-//     console.error("Failed to initialize Kafka consumer:", error);
-//     throw error;
-//   }
-// }
-
-// // Set up error handlers and timeouts
-// function setupErrorHandlers() {
-//   // Set a global timeout
-//   setTimeout(async () => {
-//     console.log("Global timeout reached (30 minutes). Force exiting...");
-//     await forceExit();
-//   }, 30 * 60 * 1000);
-
-//   // Handle process signals
-//   process.on("SIGTERM", async () => {
-//     console.log("Received SIGTERM. Cleaning up...");
-//     await forceExit();
-//   });
-
-//   process.on("SIGINT", async () => {
-//     console.log("Received SIGINT. Cleaning up...");
-//     await forceExit();
-//   });
-// }
-
-// // Main execution function
-// async function main() {
-//   setupErrorHandlers();
-  
-//   try {
-//     // Start both processes in parallel
-//     const [scriptPromise, consumerPromise] = await Promise.allSettled([
-//       initializeKafkaConsumer(),
-//       InitializeScript()
-//     ]);
-
-//     // Check for errors
-//     if (scriptPromise.status === 'rejected') {
-//       console.error('Script execution failed:', scriptPromise.reason);
-//       await forceExit();
-//     }
-
-//     if (consumerPromise.status === 'rejected') {
-//       console.error('Kafka consumer failed:', consumerPromise.reason);
-//       await forceExit();
-//     }
-
-//     // If script completes successfully, wait a bit for final messages
-//     if (scriptPromise.status === 'fulfilled') {
-//       console.log('Script completed successfully. Waiting for final messages...');
-//       await new Promise(resolve => setTimeout(resolve, 5000));
-//       await forceExit();
-//     }
-//   } catch (error) {
-//     console.error('Main execution error:', error);
-//     await forceExit();
-//   }
-// }
-
-// // Start the application
-// main().catch(async (error) => {
-//   console.error('Fatal error:', error);
-//   await forceExit();
-// });
-
 const { exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const config = require('./config/config');
 const s3Service = require('./services/s3Service');
 const kafkaService = require('./services/kafkaService');
+const clickhouseService = require('./services/clickhouseService');
+const { ErrorHandler, BuildError } = require('./utils/errorHandler');
 const logger = require('./utils/logger');
 
 class BuildServer {
   constructor() {
     this.outputDir = path.join(__dirname, '../output');
     this.isExiting = false;
+    this.buildStartTime = null;
+    this.buildProcess = null;
   }
 
   async initialize() {
     try {
+      // Validate environment variables
+      ErrorHandler.validateEnvironment([
+        'PROJECT_URI',
+        'DEPLOYMENT_ID',
+        'PROJECT_INSTALL_COMMAND',
+        'PROJECT_BUILD_COMMAND',
+        'PROJECT_ROOT_DIR'
+      ]);
+
+      // Initialize services
+      logger.info('Initializing services...');
+      await clickhouseService.initialize();
       await kafkaService.connect();
+      
+      this.buildStartTime = new Date();
       await this.setupCleanup();
       await this.runBuild();
     } catch (error) {
-      logger.error('Initialization failed:', error);
-      await this.cleanup();
+      ErrorHandler.handleError(error, logger, kafkaService);
+      await this.cleanup(error);
       process.exit(1);
     }
   }
@@ -343,12 +45,14 @@ class BuildServer {
   async runBuild() {
     try {
       // Prepare output directory
-      if (fs.existsSync(this.outputDir)) {
-        fs.rmSync(this.outputDir, { recursive: true, force: true });
-      }
-      fs.mkdirSync(this.outputDir, { recursive: true });
+      await this.prepareOutputDirectory();
 
+      // Start build process
       await kafkaService.publishLog('Starting build process...');
+      await clickhouseService.insertBuildLog(
+        config.project.deploymentId,
+        'Build process started'
+      );
 
       // Execute build
       await this.executeBuildProcess();
@@ -356,61 +60,171 @@ class BuildServer {
       // Upload artifacts
       await this.uploadArtifacts();
 
+      // Record successful completion
       await kafkaService.publishLog('Build completed successfully');
+      await clickhouseService.insertBuildLog(
+        config.project.deploymentId,
+        'Build completed successfully',
+        'INFO'
+      );
+
       await this.cleanup();
       process.exit(0);
 
     } catch (error) {
-      await kafkaService.publishLog(`Build failed: ${error.message}`);
-      await this.cleanup();
+      const errorMessage = `Build failed: ${error.message}`;
+      await kafkaService.publishLog(errorMessage);
+      await clickhouseService.insertBuildLog(
+        config.project.deploymentId,
+        errorMessage,
+        'ERROR'
+      );
+      
+      await this.cleanup(error);
       process.exit(1);
+    }
+  }
+
+  async prepareOutputDirectory() {
+    try {
+      if (fs.existsSync(this.outputDir)) {
+        fs.rmSync(this.outputDir, { recursive: true, force: true });
+      }
+      fs.mkdirSync(this.outputDir, { recursive: true });
+      logger.info('Output directory prepared');
+    } catch (error) {
+      throw new BuildError(
+        'Failed to prepare output directory',
+        ErrorHandler.BUILD_ERROR_CODES.INITIALIZATION_FAILED,
+        { originalError: error.message }
+      );
     }
   }
 
   async executeBuildProcess() {
     return new Promise((resolve, reject) => {
-      const buildProcess = exec(
+      let buildOutput = '';
+      let buildErrors = '';
+
+      this.buildProcess = exec(
         `cd ${this.outputDir} && ${config.project.installCommand} && ${config.project.buildCommand}`,
         {
           cwd: config.project.rootDir,
-          env: process.env
+          env: {
+            ...process.env,
+            ...this.getProjectEnvironmentVariables()
+          },
+          maxBuffer: 10 * 1024 * 1024 // 10MB buffer
         }
       );
 
-      buildProcess.stdout.on('data', async (data) => {
-        await kafkaService.publishLog(data.toString());
+      this.buildProcess.stdout.on('data', async (data) => {
+        const output = data.toString();
+        buildOutput += output;
+        logger.info(output.trim());
+        await Promise.all([
+          kafkaService.publishLog(output),
+          clickhouseService.insertBuildLog(config.project.deploymentId, output)
+        ]);
       });
 
-      buildProcess.stderr.on('data', async (data) => {
-        await kafkaService.publishLog(`Error: ${data.toString()}`);
+      this.buildProcess.stderr.on('data', async (data) => {
+        const error = data.toString();
+        buildErrors += error;
+        logger.error(error.trim());
+        await Promise.all([
+          kafkaService.publishLog(`Error: ${error}`),
+          clickhouseService.insertBuildLog(
+            config.project.deploymentId,
+            error,
+            'ERROR'
+          )
+        ]);
       });
 
-      buildProcess.on('close', async (code) => {
+      this.buildProcess.on('close', async (code) => {
         if (code === 0) {
           resolve();
         } else {
-          reject(new Error(`Build process exited with code ${code}`));
+          reject(new BuildError(
+            `Build process exited with code ${code}\n${buildErrors}`,
+            ErrorHandler.BUILD_ERROR_CODES.BUILD_FAILED,
+            { exitCode: code, buildErrors }
+          ));
         }
       });
 
-      buildProcess.on('error', reject);
+      this.buildProcess.on('error', (error) => {
+        reject(new BuildError(
+          `Failed to start build process: ${error.message}`,
+          ErrorHandler.BUILD_ERROR_CODES.BUILD_FAILED,
+          { originalError: error }
+        ));
+      });
+
+      // Set a timeout for the build process
+      const buildTimeout = setTimeout(() => {
+        this.buildProcess.kill();
+        reject(new BuildError(
+          'Build process timed out',
+          ErrorHandler.BUILD_ERROR_CODES.BUILD_FAILED,
+          { timeout: true }
+        ));
+      }, 30 * 60 * 1000); // 30 minutes timeout
+
+      this.buildProcess.on('close', () => clearTimeout(buildTimeout));
     });
   }
 
   async uploadArtifacts() {
     const distDir = path.join(this.outputDir, 'dist');
     if (!fs.existsSync(distDir)) {
-      throw new Error('Build directory not found');
+      throw new BuildError(
+        'Build directory not found',
+        ErrorHandler.BUILD_ERROR_CODES.BUILD_FAILED
+      );
     }
 
     const files = fs.readdirSync(distDir, { recursive: true });
+    const uploadPromises = [];
+    let uploadedCount = 0;
+    const totalFiles = files.filter(file => 
+      !fs.lstatSync(path.join(distDir, file)).isDirectory()
+    ).length;
+
     for (const file of files) {
       const filePath = path.join(distDir, file);
       if (fs.lstatSync(filePath).isDirectory()) continue;
 
-      await kafkaService.publishLog(`Uploading ${file}...`);
-      await s3Service.uploadFile(filePath, config.project.uri);
+      const uploadPromise = (async () => {
+        try {
+          await s3Service.uploadFile(filePath, config.project.uri);
+          uploadedCount++;
+          await kafkaService.publishLog(
+            `Upload progress: ${uploadedCount}/${totalFiles} files`
+          );
+        } catch (error) {
+          throw new BuildError(
+            `Failed to upload ${file}`,
+            ErrorHandler.BUILD_ERROR_CODES.UPLOAD_FAILED,
+            { originalError: error.message }
+          );
+        }
+      })();
+
+      uploadPromises.push(uploadPromise);
     }
+
+    await Promise.all(uploadPromises);
+  }
+
+  getProjectEnvironmentVariables() {
+    return Object.keys(process.env)
+      .filter(key => key.startsWith('PROJECT_ENVIRONMENT_'))
+      .reduce((envVars, key) => {
+        envVars[key] = process.env[key];
+        return envVars;
+      }, {});
   }
 
   async setupCleanup() {
@@ -425,20 +239,61 @@ class BuildServer {
       await this.cleanup();
       process.exit(0);
     });
+
+    // Handle uncaught exceptions
+    process.on('uncaughtException', async (error) => {
+      logger.error('Uncaught exception:', error);
+      await this.cleanup(error);
+      process.exit(1);
+    });
+
+    // Handle unhandled promise rejections
+    process.on('unhandledRejection', async (error) => {
+      logger.error('Unhandled rejection:', error);
+      await this.cleanup(error);
+      process.exit(1);
+    });
   }
 
-  async cleanup() {
+  async cleanup(error = null) {
     if (this.isExiting) return;
     this.isExiting = true;
 
-    try {
-      await kafkaService.disconnect();
+    const buildEndTime = new Date();
+    const status = error ? 'FAILED' : 'SUCCESS';
+    const errorMessage = error ? error.message : '';
 
-      if (fs.existsSync(this.outputDir)) {
-        fs.rmSync(this.outputDir, { recursive: true, force: true });
+    try {
+      // Kill build process if it's still running
+      if (this.buildProcess && !this.buildProcess.killed) {
+        this.buildProcess.kill();
       }
-    } catch (error) {
-      logger.error('Cleanup failed:', error);
+
+      // Record build metrics
+      await clickhouseService.recordBuildMetrics(
+        config.project.deploymentId,
+        config.project.uri,
+        this.buildStartTime,
+        buildEndTime,
+        status,
+        errorMessage
+      );
+
+      // Graceful shutdown
+      await ErrorHandler.gracefulShutdown(
+        {
+          kafka: kafkaService,
+          clickhouse: clickhouseService,
+          cleanup: async () => {
+            if (fs.existsSync(this.outputDir)) {
+              fs.rmSync(this.outputDir, { recursive: true, force: true });
+            }
+          }
+        },
+        logger
+      );
+    } catch (cleanupError) {
+      logger.error('Cleanup failed:', cleanupError);
     }
   }
 }
