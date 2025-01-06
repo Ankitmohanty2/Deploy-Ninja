@@ -35,7 +35,7 @@ const config = {
   }
 };
 
-// Validate required configuration
+// Validate required configuration for build server
 const validateConfig = () => {
   const requiredFields = [
     'aws.region',
