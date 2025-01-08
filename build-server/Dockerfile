@@ -18,3 +18,4 @@ COPY . .
 RUN mkdir output
 
 CMD ["npm", "start"]
+
